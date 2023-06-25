@@ -1,9 +1,8 @@
 use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-use std::sync::mpsc;
-use std::sync::mpsc::{Receiver, Sender};
-use std::thread;
+use tokio::sync::mpsc;
+use tokio::time::Duration;
 
 #[derive(Parser, Debug)]
 #[command(version, about = "CPAL feedback example", long_about = None)]
@@ -21,7 +20,8 @@ struct Opt {
     latency: f32,
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let sample_rate = 1000;
     let threshold = 0.2;
     let opt = Opt::parse();
@@ -52,20 +52,25 @@ fn main() -> anyhow::Result<()> {
     let mut config: cpal::StreamConfig = input_device.default_input_config()?.into();
     config.sample_rate = cpal::SampleRate(sample_rate);
 
-    let (tx, rx): (Sender<f32>, Receiver<f32>) = mpsc::channel();
+    let (tx_sample, mut rx_sample) = mpsc::channel(1);
     let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
         for &sample in data {
             let abs = sample.abs();
             if abs > threshold {
-                tx.send(abs).unwrap();
+                if tx_sample.capacity() != 0 {
+                    tx_sample.blocking_send(abs).unwrap();
+                }
             }
         }
     };
 
-    let sample_debounce_receiver = thread::spawn(move || {
-        for sample in rx {
-            println!("{}", sample);
-            std::thread::sleep(std::time::Duration::from_secs(1));
+    let sample_debounce_receiver = tokio::spawn(async move {
+        loop {
+            let sample = rx_sample.recv().await;
+            println!("{}", sample.unwrap());
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            // Flush one value after the sleep. TODO: Clean up this logic
+            rx_sample.recv().await;
         }
     });
 

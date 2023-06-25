@@ -7,3 +7,4 @@ edition = "2021"
 anyhow = "1.0.71"
 clap = { version = "4.3.8", features = ["derive"] }
 cpal = { version = "0.15.2", features = ["jack"] }
+tokio = { version = "1.28.2", features = ["full"] }
