@@ -6,6 +6,6 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.71"
 clap = { version = "4.3.8", features = ["derive"] }
-cpal = { version = "0.15.2", features = ["jack"] }
+cpal = { version = "0.15.2" }
 rumqttc = "0.22.0"
 tokio = { version = "1.28.2", features = ["full"] }
