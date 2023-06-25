@@ -53,6 +53,10 @@ async fn main() -> anyhow::Result<()> {
     ))]
     let host = cpal::default_host();
 
+    host.input_devices()
+        .unwrap()
+        .for_each(|d| println!("{:?}", d.name()));
+
     // Find devices.
     let input_device = if opt.input_device == "default" {
         host.default_input_device()

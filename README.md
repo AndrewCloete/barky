@@ -43,3 +43,10 @@ is no recording to play back for further analysis.
 - A periodic timer emits an MQTT message if no sound is detected.
 - When sound is detected, the timer is reset.
 - Both the sound threshold and the silence timeout is configurable.
+
+
+# Linux
+```bash
+apt install alsa-utils
+apt install libasound2-dev
+```
