@@ -1,6 +1,10 @@
 use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
+use std::sync::mpsc;
+use std::sync::mpsc::{Receiver, Sender};
+use std::thread;
+
 #[derive(Parser, Debug)]
 #[command(version, about = "CPAL feedback example", long_about = None)]
 struct Opt {
@@ -18,6 +22,8 @@ struct Opt {
 }
 
 fn main() -> anyhow::Result<()> {
+    let sample_rate = 1000;
+    let threshold = 0.2;
     let opt = Opt::parse();
 
     #[cfg(any(
@@ -43,18 +49,25 @@ fn main() -> anyhow::Result<()> {
     println!("Using input device: \"{}\"", input_device.name()?);
 
     // We'll try and use the same configuration between streams to keep it simple.
-    let config: cpal::StreamConfig = input_device.default_input_config()?.into();
+    let mut config: cpal::StreamConfig = input_device.default_input_config()?.into();
+    config.sample_rate = cpal::SampleRate(sample_rate);
 
-    fn sample_to_string(sample: f32) -> String {
-        let count = ((sample + 1.0) * 20.0) as usize;
-        " ".repeat(count) + "o"
-    }
-
+    let (tx, rx): (Sender<f32>, Receiver<f32>) = mpsc::channel();
     let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
         for &sample in data {
-            println!("{}", sample_to_string(sample))
+            let abs = sample.abs();
+            if abs > threshold {
+                tx.send(abs).unwrap();
+            }
         }
     };
+
+    let sample_debounce_receiver = thread::spawn(move || {
+        for sample in rx {
+            println!("{}", sample);
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+    });
 
     // Build streams.
     println!(
