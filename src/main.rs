@@ -1,6 +1,8 @@
 use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
+use rumqttc::{AsyncClient, MqttOptions, QoS};
+
 use tokio::sync::mpsc;
 use tokio::time::Duration;
 
@@ -11,20 +13,34 @@ struct Opt {
     #[arg(short, long, value_name = "IN", default_value_t = String::from("default"))]
     input_device: String,
 
-    /// The output audio device to use
-    #[arg(short, long, value_name = "OUT", default_value_t = String::from("default"))]
-    output_device: String,
+    #[arg(
+        short,
+        long,
+        value_name = "MQTT_HOST",
+        default_value_t = String::from("homeassistant.local")
+    )]
+    broker_mqtt: String,
 
-    /// Specify the delay between input and output
-    #[arg(short, long, value_name = "DELAY_MS", default_value_t = 150.0)]
-    latency: f32,
+    #[arg(short, long, value_name = "MQTT_USERNAME")]
+    username_mqtt: String,
+
+    #[arg(short, long, value_name = "MQTT_PASSWORD")]
+    password_mqtt: String,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let sample_rate = 1000;
-    let threshold = 0.2;
     let opt = Opt::parse();
+
+    let sample_rate = 1000; // We can get away with a very low sample rate since we are not interested in the audio, only in "loud events".
+    let threshold = 0.2;
+
+    println!("{:?}", &opt);
+    let mut mqttoptions = MqttOptions::new("rumqtt-sync", opt.broker_mqtt, 1883);
+    mqttoptions.set_credentials(opt.username_mqtt, opt.password_mqtt);
+    mqttoptions.set_keep_alive(Duration::from_secs(5));
+    mqttoptions.set_transport(rumqttc::Transport::Tcp);
+    let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
 
     #[cfg(any(
         not(any(
@@ -48,7 +64,6 @@ async fn main() -> anyhow::Result<()> {
 
     println!("Using input device: \"{}\"", input_device.name()?);
 
-    // We'll try and use the same configuration between streams to keep it simple.
     let mut config: cpal::StreamConfig = input_device.default_input_config()?.into();
     config.sample_rate = cpal::SampleRate(sample_rate);
 
@@ -64,37 +79,36 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let sample_debounce_receiver = tokio::spawn(async move {
+    // Build streams.
+    println!("Attempting to build streams `{:?}`.", config);
+    let input_stream = input_device.build_input_stream(&config, input_data_fn, err_fn, None)?;
+    println!("Successfully built streams.");
+
+    // Play the streams.
+    println!("Starting the input stream",);
+    input_stream.play()?;
+
+    tokio::spawn(async move {
         loop {
             let sample = rx_sample.recv().await;
             println!("{}", sample.unwrap());
+            match client
+                .publish("casa/bark", QoS::AtLeastOnce, false, "1")
+                .await
+            {
+                Ok(_) => println!("Sent"),
+                Err(e) => println!("{}", e),
+            }
             tokio::time::sleep(Duration::from_secs(1)).await;
             // Flush one value after the sleep. TODO: Clean up this logic
             rx_sample.recv().await;
         }
     });
-
-    // Build streams.
-    println!(
-        "Attempting to build both streams with f32 samples and `{:?}`.",
-        config
-    );
-    let input_stream = input_device.build_input_stream(&config, input_data_fn, err_fn, None)?;
-    println!("Successfully built streams.");
-
-    // Play the streams.
-    println!(
-        "Starting the input and output streams with `{}` milliseconds of latency.",
-        opt.latency
-    );
-    input_stream.play()?;
-
-    // Run for 3 seconds before closing.
-    println!("Playing for 3 seconds... ");
-    std::thread::sleep(std::time::Duration::from_secs(10));
-    drop(input_stream);
-    println!("Done!");
-    Ok(())
+    println!("Loop forever");
+    loop {
+        let notification = eventloop.poll().await.unwrap();
+        println!("Received = {:?}", notification);
+    }
 }
 
 fn err_fn(err: cpal::StreamError) {
