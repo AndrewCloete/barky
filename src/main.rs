@@ -13,6 +13,9 @@ struct Opt {
     #[arg(short, long, value_name = "IN", default_value_t = String::from("default"))]
     input_device: String,
 
+    #[arg(short, long, value_name = "THRESHOLD", default_value_t = 0.2)]
+    threshold: f32,
+
     #[arg(
         short,
         long,
@@ -33,7 +36,6 @@ async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
 
     let sample_rate = 1000; // We can get away with a very low sample rate since we are not interested in the audio, only in "loud events".
-    let threshold = 0.2;
 
     println!("{:?}", &opt);
     let mut mqttoptions = MqttOptions::new("rumqtt-sync", opt.broker_mqtt, 1883);
@@ -75,7 +77,7 @@ async fn main() -> anyhow::Result<()> {
     let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
         for &sample in data {
             let abs = sample.abs();
-            if abs > threshold {
+            if abs > opt.threshold {
                 if tx_sample.capacity() != 0 {
                     tx_sample.blocking_send(abs).unwrap();
                 }
