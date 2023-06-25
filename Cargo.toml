@@ -3,6 +3,7 @@ name = "barky"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
+anyhow = "1.0.71"
+clap = { version = "4.3.8", features = ["derive"] }
+cpal = { version = "0.15.2", features = ["jack"] }
