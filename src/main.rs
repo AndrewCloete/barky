@@ -4,6 +4,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rumqttc::{AsyncClient, MqttOptions, QoS};
 
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::TryRecvError;
 use tokio::time::Duration;
 
 #[derive(Parser, Debug)]
@@ -40,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
     println!("{:?}", &opt);
     let mut mqttoptions = MqttOptions::new("rumqtt-sync", opt.broker_mqtt, 1883);
     mqttoptions.set_credentials(opt.username_mqtt, opt.password_mqtt);
-    mqttoptions.set_keep_alive(Duration::from_secs(5));
+    mqttoptions.set_keep_alive(Duration::from_secs(20));
     mqttoptions.set_transport(rumqttc::Transport::Tcp);
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
 
@@ -93,21 +94,50 @@ async fn main() -> anyhow::Result<()> {
     // Play the streams.
     println!("Starting the input stream",);
     input_stream.play()?;
+    let mq_client_1 = client.clone();
 
+    let (tx_bark, mut rx_bark) = mpsc::channel(1);
     tokio::spawn(async move {
         loop {
             let sample = rx_sample.recv().await;
             println!("{}", sample.unwrap());
-            match client
+            match mq_client_1
                 .publish("casa/bark", QoS::AtLeastOnce, false, "1")
                 .await
             {
-                Ok(_) => println!("Sent"),
+                Ok(_) => {
+                    println!("Sent: Bark!");
+                    tx_bark.send("bark!").await.unwrap();
+                }
                 Err(e) => println!("{}", e),
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
             // Flush one value after the sleep. TODO: Clean up this logic
             rx_sample.recv().await;
+        }
+    });
+
+    // Timer for no-bark
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(60 * 5)).await;
+            match rx_bark.try_recv() {
+                Ok(_) => println!("No bark timer reset"),
+                Err(TryRecvError::Empty) => {
+                    match client
+                        .publish("casa/bark", QoS::AtLeastOnce, false, "0")
+                        .await
+                    {
+                        Ok(_) => {
+                            println!("Sent: No bark!");
+                        }
+                        Err(e) => println!("{}", e),
+                    }
+                }
+                Err(TryRecvError::Disconnected) => {
+                    println!("Whut?");
+                }
+            }
         }
     });
     println!("Loop forever");
