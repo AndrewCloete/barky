@@ -50,3 +50,47 @@ is no recording to play back for further analysis.
 apt install alsa-utils
 apt install libasound2-dev
 ```
+
+# Deploying on Linux
+NB: Connecting to the PulseAudio service from a root process is not a good idea.
+So whatever way you wish to daemonize Barky, be sure it is not running as root.
+
+Lukily, `systemd` allows user-based services using the `--user` flag. A simple
+example is shown below. A more flexible (but complicated) setup would be to run
+`supervisord` using `systemd --user` and then using it to run Barky.
+
+Create directory for defining user-based service
+```bash
+mkdir -p ~/.config/systemd/user
+```
+
+Create the service file
+```bash
+vim ~/.config/systemd/user/barky.service
+```
+```conf
+[Unit]
+Description=Barky
+DefaultDependencies=no
+Before=shutdown.target
+
+[Service]
+Type=simple
+ExecStart=/home/user/.cargo/bin/barky -p <redacted> -u mqtt-user -t 0.1 -i pulse 
+TimeoutStartSec=0
+Restart=on-failure
+
+[Install]
+WantedBy=shutdown.target
+```
+
+Start and verify
+```bash
+systemctl --user daemon-reload
+systemctl --user enable barky.service
+systemctl --user start barky.service
+systemctl --user status barky.service
+```
+
+
+
