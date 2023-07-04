@@ -1,8 +1,11 @@
 use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use std::env::var;
+use std::fs;
 
-use rumqttc::{AsyncClient, MqttOptions, QoS};
+use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, Outgoing, QoS};
 
+use serde::Deserialize;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::time::Duration;
@@ -13,35 +16,55 @@ struct Opt {
     /// The input audio device to use
     #[arg(short, long, value_name = "IN", default_value_t = String::from("default"))]
     input_device: String,
+}
 
-    #[arg(short, long, value_name = "THRESHOLD", default_value_t = 0.2)]
+#[derive(Debug, Deserialize, Clone)]
+struct MqttConfig {
+    broker: String,
+    username: String,
+    password: String,
+    port: u16,
+    keepalive_sec: u64,
+    bark_topic: String,
+    no_bark_topic: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct ConfigFile {
+    mqtt: MqttConfig,
     threshold: f32,
+    sample_rate: u32,
+    no_bark_seconds: u64,
+}
 
-    #[arg(
-        short,
-        long,
-        value_name = "MQTT_HOST",
-        default_value_t = String::from("homeassistant.local")
-    )]
-    broker_mqtt: String,
-
-    #[arg(short, long, value_name = "MQTT_USERNAME")]
-    username_mqtt: String,
-
-    #[arg(short, long, value_name = "MQTT_PASSWORD")]
-    password_mqtt: String,
+fn read_config() -> Result<ConfigFile, Box<dyn std::error::Error>> {
+    let home_path = var("HOME").expect("$HOME not defined");
+    let content = fs::read_to_string(format!("{}/.barky.json", home_path))?;
+    let config: ConfigFile = serde_json::from_str(&content)?;
+    Ok(config)
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
+    println!("{:?}", opt);
 
-    let sample_rate = 1000; // We can get away with a very low sample rate since we are not interested in the audio, only in "loud events".
+    let file_config = read_config().unwrap();
+    println!("{:?}", file_config);
 
-    println!("{:?}", &opt);
-    let mut mqttoptions = MqttOptions::new("rumqtt-sync", opt.broker_mqtt, 1883);
-    mqttoptions.set_credentials(opt.username_mqtt, opt.password_mqtt);
-    mqttoptions.set_keep_alive(Duration::from_secs(20));
+    let sample_rate = file_config.sample_rate; // We can get away with a very low sample rate since we are not interested in the audio, only in "loud events".
+    let bark_topic = file_config.mqtt.bark_topic;
+    let no_bark_topic = file_config.mqtt.no_bark_topic;
+    let no_bark_seconds = file_config.no_bark_seconds;
+    let threshold = file_config.threshold;
+
+    let mut mqttoptions = MqttOptions::new(
+        "rumqtt-sync",
+        file_config.mqtt.broker,
+        file_config.mqtt.port,
+    );
+    mqttoptions.set_credentials(file_config.mqtt.username, file_config.mqtt.password);
+    mqttoptions.set_keep_alive(Duration::from_secs(file_config.mqtt.keepalive_sec));
     mqttoptions.set_transport(rumqttc::Transport::Tcp);
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
 
@@ -78,7 +101,7 @@ async fn main() -> anyhow::Result<()> {
     let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
         for &sample in data {
             let abs = sample.abs();
-            if abs > opt.threshold {
+            if abs > threshold {
                 if tx_sample.capacity() != 0 {
                     tx_sample.blocking_send(abs).unwrap();
                 }
@@ -102,11 +125,10 @@ async fn main() -> anyhow::Result<()> {
             let sample = rx_sample.recv().await;
             println!("{}", sample.unwrap());
             match mq_client_1
-                .publish("casa/bark", QoS::AtLeastOnce, false, "1")
+                .publish(&bark_topic, QoS::AtLeastOnce, false, "1")
                 .await
             {
                 Ok(_) => {
-                    println!("Sent: Bark!");
                     tx_bark.send("bark!").await.unwrap();
                 }
                 Err(e) => println!("{}", e),
@@ -120,17 +142,15 @@ async fn main() -> anyhow::Result<()> {
     // Timer for no-bark
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(Duration::from_secs(60 * 5)).await;
+            tokio::time::sleep(Duration::from_secs(no_bark_seconds)).await;
             match rx_bark.try_recv() {
                 Ok(_) => println!("No bark timer reset"),
                 Err(TryRecvError::Empty) => {
                     match client
-                        .publish("casa/bark", QoS::AtLeastOnce, false, "0")
+                        .publish(&no_bark_topic, QoS::AtLeastOnce, false, "0")
                         .await
                     {
-                        Ok(_) => {
-                            println!("Sent: No bark!");
-                        }
+                        Ok(_) => (),
                         Err(e) => println!("{}", e),
                     }
                 }
@@ -143,7 +163,12 @@ async fn main() -> anyhow::Result<()> {
     println!("Loop forever");
     loop {
         let notification = eventloop.poll().await.unwrap();
-        println!("Received = {:?}", notification);
+        match notification {
+            // Don't print the pings
+            Event::Outgoing(Outgoing::PingReq) => (),
+            Event::Incoming(Incoming::PingResp) => (),
+            _ => println!("rx {:?}", notification),
+        }
     }
 }
 

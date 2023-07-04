@@ -1,0 +1,14 @@
+{
+    "threshold": 0.2,
+    "sample_rate": 1000,
+    "no_bark_seconds": 300,
+    "mqtt": {
+        "broker": "homeassistant.local",
+        "username": "mqtt-user",
+        "password": "ilovetaylorswift",
+        "port": 1883,
+        "keepalive_sec": 30,
+        "bark_topic": "casa/bark",
+        "no_bark_topic": "casa/bark"
+    }
+}

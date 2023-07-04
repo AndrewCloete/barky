@@ -45,13 +45,17 @@ is no recording to play back for further analysis.
 - Both the sound threshold and the silence timeout is configurable.
 
 
-# Linux
+# Deploying on Linux
+Add config to home directory
+```bash
+cp example.barky.json ~/.barky.json
+```
+
 ```bash
 apt install alsa-utils
 apt install libasound2-dev
 ```
 
-# Deploying on Linux
 NB: Connecting to the PulseAudio service from a root process is not a good idea.
 So whatever way you wish to daemonize Barky, be sure it is not running as root.
 
@@ -76,7 +80,7 @@ Before=shutdown.target
 
 [Service]
 Type=simple
-ExecStart=/home/user/.cargo/bin/barky -p <redacted> -u mqtt-user -t 0.1 -i pulse 
+ExecStart=/home/user/.cargo/bin/barky -i pulse 
 TimeoutStartSec=0
 RestartSec=60
 Restart=on-failure
@@ -95,6 +99,6 @@ systemctl --user status barky.service
 
 Check the logs using 
 ```bash
-journalctl --user -u barky.service | less
+journalctl --user -u barky.service | tail
 ```
 
