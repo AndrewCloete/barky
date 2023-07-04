@@ -78,6 +78,7 @@ Before=shutdown.target
 Type=simple
 ExecStart=/home/user/.cargo/bin/barky -p <redacted> -u mqtt-user -t 0.1 -i pulse 
 TimeoutStartSec=0
+RestartSec=60
 Restart=on-failure
 
 [Install]
@@ -92,5 +93,8 @@ systemctl --user start barky.service
 systemctl --user status barky.service
 ```
 
-
+Check the logs using 
+```bash
+journalctl --user -u barky.service | less
+```
 
