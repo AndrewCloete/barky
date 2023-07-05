@@ -122,10 +122,10 @@ async fn main() -> anyhow::Result<()> {
     let (tx_bark, mut rx_bark) = mpsc::channel(1);
     tokio::spawn(async move {
         loop {
-            let sample = rx_sample.recv().await;
-            println!("{}", sample.unwrap());
+            let sample = (rx_sample.recv().await).expect("Could not unwrap sample");
+            println!("{}", sample);
             match mq_client_1
-                .publish(&bark_topic, QoS::AtLeastOnce, false, "1")
+                .publish(&bark_topic, QoS::AtLeastOnce, false, sample.to_string())
                 .await
             {
                 Ok(_) => {
